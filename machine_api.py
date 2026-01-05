@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, PlainTextResponse
 from dotenv import load_dotenv
 load_dotenv()
-from fastapi.responses import JSONResponse, PlainTextResponse
 from datetime import datetime, timedelta
 from collections import defaultdict, deque
 import os, time, requests, statistics, math
@@ -17,15 +17,14 @@ PAYPAL_SECRET = os.getenv("PAYPAL_SECRET")
 # ================= STATE (RAM ONLY) =================
 usage = defaultdict(lambda: {"count": 0, "reset": datetime.utcnow() + timedelta(days=1)})
 paid_clients = set()
-
 TOTAL_CALLS = 0
 TOTAL_REVENUE = 0.0
 
-# ================= RAM DATA =================
 WINDOW = 100
 EVENTS = deque(maxlen=WINDOW)
 LAST_SNAPSHOT = []
 
+# ================= RAM DATA =================
 def generate_event():
     v = int(time.time() * 1000) % 10000
     EVENTS.append(v)
@@ -64,7 +63,7 @@ def create_order(amount, client_id):
     return None
 
 # ================= FASTAPI =================
-app = FastAPI(title="Machine Penny API")
+app = FastAPI(title="Machine Penny API - PayPal Only")
 
 def meter(request: Request):
     global TOTAL_CALLS, TOTAL_REVENUE
@@ -75,13 +74,13 @@ def meter(request: Request):
         usage[ip] = {"count": 0, "reset": datetime.utcnow() + timedelta(days=1)}
 
     if u["count"] >= FREE_LIMIT and ip not in paid_clients:
-        amount = (u["count"] - FREE_LIMIT + 1) * PRICE_PER_CALL
+        amount_usd = (u["count"] - FREE_LIMIT + 1) * PRICE_PER_CALL
         return JSONResponse(
             status_code=402,
             content={
                 "price_per_call": PRICE_PER_CALL,
-                "amount_due": round(amount, 2),
-                "paypal": create_order(amount, ip)
+                "amount_due_usd": round(amount_usd,2),
+                "paypal": create_order(amount_usd, ip)
             }
         )
 
@@ -90,19 +89,16 @@ def meter(request: Request):
     if u["count"] > FREE_LIMIT:
         TOTAL_REVENUE += PRICE_PER_CALL
 
-    print(f"{ip} | calls={u['count']} | revenue=${TOTAL_REVENUE:.2f}")
+    print(f"[{datetime.utcnow().isoformat()}] {ip} | calls={u['count']} | revenue=${TOTAL_REVENUE:.2f}")
     return None
 
 # ================= VALUE ENDPOINTS =================
-
 @app.get("/query")
 def query(req: Request):
     r = meter(req)
     if r: return r
-
     v = generate_event()
     snapshot()
-
     return {
         "value": v,
         "mean": round(statistics.mean(EVENTS), 2),
@@ -115,16 +111,9 @@ def query(req: Request):
 def metrics(req: Request):
     r = meter(req)
     if r: return r
-
-    if len(EVENTS) < 2:
-        return PlainTextResponse("insufficient_data 1")
-
+    if len(EVENTS) < 2: return PlainTextResponse("insufficient_data")
     diffs = [abs(EVENTS[i] - EVENTS[i-1]) for i in range(1, len(EVENTS))]
-    entropy = -sum(
-        (d / sum(diffs)) * math.log(d / sum(diffs))
-        for d in diffs if d > 0
-    )
-
+    entropy = -sum((d/sum(diffs))*math.log(d/sum(diffs)) for d in diffs if d>0)
     return PlainTextResponse(
         f"calls {TOTAL_CALLS}\n"
         f"revenue {TOTAL_REVENUE}\n"
@@ -138,20 +127,75 @@ def metrics(req: Request):
 def delta(req: Request):
     r = meter(req)
     if r: return r
-
-    if not LAST_SNAPSHOT:
-        return {"delta": [], "changed": False}
-
+    if not LAST_SNAPSHOT: return {"delta": [], "changed": False}
     current = list(EVENTS)
     delta_vals = [c - p for c, p in zip(current[-len(LAST_SNAPSHOT):], LAST_SNAPSHOT)]
+    return {"changed": any(delta_vals), "delta": delta_vals[-10:], "magnitude": sum(abs(d) for d in delta_vals)}
 
-    return {
-        "changed": any(delta_vals),
-        "delta": delta_vals[-10:],  # last 10 changes
-        "magnitude": sum(abs(d) for d in delta_vals)
-    }
+@app.get("/latest")
+def latest(req: Request):
+    r = meter(req)
+    if r: return r
+    return {"latest": EVENTS[-1] if EVENTS else None}
 
-# ================= PAYMENT =================
+@app.get("/lookup")
+def lookup(key: str, req: Request):
+    r = meter(req)
+    if r: return r
+    return {"key": key, "value": hash(key) % 10000}
+
+@app.get("/resolve")
+def resolve(id: int, req: Request):
+    r = meter(req)
+    if r: return r
+    return {"id": id, "resolved": True}
+
+@app.get("/signals")
+def signals(req: Request):
+    r = meter(req)
+    if r: return r
+    return {"signal": "BUY", "strength": 0.91}
+
+@app.get("/features")
+def features(req: Request):
+    r = meter(req)
+    if r: return r
+    return {"features": [0.12, 0.88, 0.44, 0.91]}
+
+@app.get("/stats")
+def stats(req: Request):
+    r = meter(req)
+    if r: return r
+    return {"total_calls": TOTAL_CALLS, "revenue": TOTAL_REVENUE}
+
+@app.get("/pricing")
+def pricing():
+    return {"free_calls": FREE_LIMIT, "price_per_call": PRICE_PER_CALL}
+
+# ================= OPENAI-STYLE ENDPOINTS =================
+@app.post("/predict")
+def predict(data: dict, req: Request):
+    r = meter(req)
+    if r: return r
+    x = data.get("input", 1)
+    value = (sum(EVENTS) + x*42) % 10000
+    return {"input": x, "prediction": value}
+
+@app.post("/embed")
+def embed(data: dict, req: Request):
+    r = meter(req)
+    if r: return r
+    vec = [(hash(str(data.get("input", i))) % 1000)/1000 for i in range(8)]
+    return {"embedding": vec}
+
+@app.post("/completion")
+def completion(data: dict, req: Request):
+    r = meter(req)
+    if r: return r
+    prompt = data.get("prompt","")
+    return {"completion": f"Output for '{prompt}' at {int(time.time())}"}
+
+# ================= PAYMENT WEBHOOK =================
 @app.post("/paypal/webhook")
 async def paypal_webhook(req: Request):
     body = await req.json()
@@ -163,7 +207,7 @@ async def paypal_webhook(req: Request):
         pass
     return {"ok": True}
 
-# ================= DISCOVERY =================
+# ================= BOT DISCOVERY =================
 @app.get("/robots.txt")
 def robots():
     return PlainTextResponse(
@@ -171,14 +215,26 @@ def robots():
         "Allow: /query\n"
         "Allow: /stats\n"
         "Allow: /metrics\n"
+        "Allow: /delta\n"
+        "Allow: /latest\n"
+        "Allow: /lookup\n"
+        "Allow: /resolve\n"
+        "Allow: /signals\n"
+        "Allow: /features\n"
+        "Allow: /predict\n"
+        "Allow: /embed\n"
+        "Allow: /completion\n"
     )
 
 @app.get("/")
 def root():
     return {
-        "endpoints": ["/query", "/metrics", "/delta"],
+        "endpoints": [
+            "/query","/stats","/metrics","/delta","/latest",
+            "/lookup","/resolve","/signals","/features",
+            "/predict","/embed","/completion"
+        ],
         "price_per_call": PRICE_PER_CALL
     }
-
 
 print("PayPal ID loaded:", bool(PAYPAL_CLIENT_ID))
