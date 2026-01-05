@@ -1,0 +1,14 @@
+User-agent: *
+Allow: /query
+Allow: /metrics
+Allow: /delta
+Allow: /latest
+Allow: /lookup
+Allow: /resolve
+Allow: /signals
+Allow: /features
+Allow: /predict
+Allow: /embed
+Allow: /completion
+Allow: /score
+Allow: /aggregate
