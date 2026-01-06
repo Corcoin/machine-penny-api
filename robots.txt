@@ -18,6 +18,7 @@ Allow: /completion
 
 # Crypto
 Allow: /crypto/latest
+Sitemap: https://peak-made-extensive-phases.trycloudflare.com/sitemap.xml
 Allow: /crypto/signals
 
 # PayPal webhook (note: POST only, but crawler can ignore)
