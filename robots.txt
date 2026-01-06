@@ -1,4 +1,5 @@
 User-agent: *
+# Analytics / Events
 Allow: /query
 Allow: /metrics
 Allow: /delta
@@ -7,8 +8,20 @@ Allow: /lookup
 Allow: /resolve
 Allow: /signals
 Allow: /features
+Allow: /stats
+Allow: /pricing
+
+# AI / ML
 Allow: /predict
 Allow: /embed
 Allow: /completion
-Allow: /score
-Allow: /aggregate
+
+# Crypto
+Allow: /crypto/latest
+Allow: /crypto/signals
+
+# PayPal webhook (note: POST only, but crawler can ignore)
+Disallow: /paypal/webhook
+
+# Root
+Allow: /
